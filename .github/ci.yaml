@@ -1,0 +1,53 @@
+name: Continuous Integration Workflow
+
+# This workflow is triggered whenever a new PR is created on the main branch
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+
+jobs:
+
+  # Run unit tests to make sure everything is 👍
+  test:
+    name: 'Run tests'
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./app
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      name: 'Checkout repository'
+   
+    - name: 'Run Tests'
+      run: make test
+
+  # Run the linter to check for code style issues
+  lint:
+    name: 'Run linter'
+    defaults:
+      run:
+        shell: bash
+        # Define the working directory for all run steps in the workflow
+        working-directory: ./web
+    runs-on: ubuntu-latest
+    steps:    
+    - uses: actions/checkout@v2
+      name: 'Checkout repository'
+    
+    - name: Python Linter
+      uses: sunnysid3up/python-linter@master
+      with:
+        source: "src"
+        mypy-options: "--ignore-missing-imports --show-error-codes"
+        pylint-options: "--rcfile=pylint/setup.cfg"
+        isort-options: "-w 100"
+        django: true
