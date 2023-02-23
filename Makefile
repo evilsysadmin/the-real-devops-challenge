@@ -4,7 +4,6 @@ local-mongodb:
 		echo "eh"
 	endif
 	
-
 nolocal-mongodb:
 	docker stop local-mongodb && docker rm local-mongodb
 
@@ -18,40 +17,61 @@ build:
 	docker-compose build
  
 test:
-	docker run -it -v $(shell pwd):/tmp/app -w /tmp/app --rm painless/tox:latest /bin/bash tox
+	docker run -v $(shell pwd):/tmp/app -w /tmp/app --rm painless/tox:latest /bin/bash tox
 
-deps:
+helm-deps:
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	helm repo add stable https://charts.helm.sh/stable
+	helm repo add grafana https://grafana.github.io/helm-charts
 	helm repo update
 
 deploy:
-	kubectl apply -f yaml/
-	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+	kubectl apply -f yaml/app
+	
+setup-local-names:
+	scripts/setup-local-names.sh
 
-# load-images:
-# 	kind load docker-image intellygenz-mongodb-import:latest --name local-cluster
+ingress:
+	kubectl apply -f yaml/nginx-ingress
+	echo "Waiting for ingress controller to fully deploy..." 
+	kubectl wait --namespace ingress-nginx \
+	--for=condition=ready pod \
+	--selector=app.kubernetes.io/component=controller \
+	--timeout=240s
 
-observability: deps
-	kubectl create namespace monitoring
+observability: helm-deps setup-local-names
+	kubectl apply -f monitoring/namespace.yaml
+	
+	helm install kind-prometheus --values monitoring/prometheus-stack-values.yaml \
+		prometheus-community/kube-prometheus-stack \
+		--namespace monitoring --set prometheus.service.nodePort=30000 \
+		--set prometheus.service.type=NodePort \
+		--set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+		--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+		--set grafana.service.type=ClusterIP --set alertmanager.service.nodePort=32000 \
+		--set alertmanager.service.type=NodePort --set prometheus-node-exporter.service.nodePort=32001 \
+		--set prometheus-node-exporter.service.type=NodePort 
+
+	helm install loki-distributed grafana/loki-distributed  --namespace monitoring
+	
+	helm install promtail -f monitoring/promtail.yaml grafana/promtail --set "loki.serviceName=loki-distributed-gateway" --namespace monitoring 
+	
 	kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	
 	kubectl patch -n kube-system deployment metrics-server --type=json \
-  	-p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+  		-p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 
-	helm install kind-prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --set prometheus.service.nodePort=30000 --set prometheus.service.type=NodePort --set grafana.service.nodePort=31000 --set grafana.service.type=NodePort --set alertmanager.service.nodePort=32000 --set alertmanager.service.type=NodePort --set prometheus-node-exporter.service.nodePort=32001 --set prometheus-node-exporter.service.type=NodePort
 
 bootstrap:
-	scripts/kind-with-registry.sh
-	kubectl create ns app
+	bash scripts/kind-with-registry.sh
 	$(MAKE) observability
-	$(MAKE) build_and_push
+	$(MAKE) ingress	
 	$(MAKE) deploy
-
-build_and_push:
-	scripts/build_and_push.sh
-
-list-registry-tags:
-	curl -X GET http://localhost:5001/v2/intellygenz/api/tags/list | jq
+	$(MAKE) setup-local-names
+	
+	
+build-and-push:
+	scripts/build-and-push.sh
 
 clean:
 	kind delete cluster --name local-cluster

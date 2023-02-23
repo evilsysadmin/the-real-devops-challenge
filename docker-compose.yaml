@@ -24,6 +24,5 @@ services:
     image: mongo:6.0.3
     container_name: mongo-import
     volumes:
-      - ./data/restaurant-original.json:/restaurant.json
+      - ./data/restaurant.json:/restaurant.json
     command: mongoimport --legacy --collection=restaurant --type json --host local-mongodb -u admin -p password --authenticationDatabase=admin --db=restaurants  --file /restaurant.json
-#--collection=restaurants
