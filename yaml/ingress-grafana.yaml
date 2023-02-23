@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  rules:
+  - http:
+      paths:
+      - pathType: Prefix
+        path: /grafana/.*
+        backend:
+          service:
+            name: kind-prometheus-grafana
+            port:
+              number: 3000
+  
